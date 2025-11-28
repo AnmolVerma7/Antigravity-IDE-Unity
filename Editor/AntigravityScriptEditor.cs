@@ -6,6 +6,7 @@ using System.Linq;
 using Unity.CodeEditor;
 using UnityEditor;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 [InitializeOnLoad]
 public class AntigravityScriptEditor : IExternalCodeEditor
@@ -20,7 +21,7 @@ public class AntigravityScriptEditor : IExternalCodeEditor
     static AntigravityScriptEditor()
     {
         CodeEditor.Register(new AntigravityScriptEditor());
-        
+
         string current = EditorPrefs.GetString("kScriptsDefaultApp");
         if (IsAntigravityInstalled() && !current.Contains(EditorName))
         {
@@ -33,12 +34,29 @@ public class AntigravityScriptEditor : IExternalCodeEditor
         return KnownPaths.Any(p => File.Exists(p) || Directory.Exists(p));
     }
 
+    // [Anmol V] Updated to dynamically find the actual executable within the .app bundle
+    // This ensures we target the binary directly, which is required for proper instance reuse.
     private static string GetExecutablePath(string path)
     {
-        if (path.EndsWith(".app"))
+        if (path.EndsWith(".app", StringComparison.OrdinalIgnoreCase))
         {
-            string executable = Path.Combine(path, "Contents", "MacOS", "Antigravity");
-            return File.Exists(executable) ? executable : path;
+            string macOsDir = Path.Combine(path, "Contents", "MacOS");
+            if (!Directory.Exists(macOsDir)) return path;
+
+            // 1. Try exact match "Antigravity"
+            string candidate = Path.Combine(macOsDir, "Antigravity");
+            if (File.Exists(candidate)) return candidate;
+
+            // 2. Try match with .app name (e.g. "Antigravity IDE")
+            string appName = Path.GetFileNameWithoutExtension(path);
+            candidate = Path.Combine(macOsDir, appName);
+            if (File.Exists(candidate)) return candidate;
+
+            // 3. Fallback: take the first file found in MacOS dir
+            var files = Directory.GetFiles(macOsDir);
+            if (files.Length > 0) return files[0];
+
+            return path;
         }
         return path;
     }
@@ -65,7 +83,7 @@ public class AntigravityScriptEditor : IExternalCodeEditor
 
     public void Initialize(string editorInstallationPath)
     {
-        // Perform any initialization here
+        // Perform any initialization here if needed
     }
 
     public void OnGUI()
@@ -77,43 +95,86 @@ public class AntigravityScriptEditor : IExternalCodeEditor
 
     public bool OpenProject(string filePath, int line, int column)
     {
+        // 1. Figure out which Antigravity binary / bundle we’re using
         string installation = CodeEditor.CurrentEditorInstallation;
-        
-        // If no specific file, just open the project folder
-        if (string.IsNullOrEmpty(filePath))
+
+        if (string.IsNullOrEmpty(installation))
         {
-            filePath = Directory.GetCurrentDirectory();
+            installation = KnownPaths.FirstOrDefault(p => File.Exists(p) || Directory.Exists(p));
+            if (string.IsNullOrEmpty(installation))
+            {
+                Debug.LogError("Antigravity installation could not be found.");
+                return false;
+            }
         }
 
-        string arguments;
-        if (Directory.Exists(filePath))
+        // 2. Make sure we have up-to-date .csproj / .sln files
+        // [Anmol V] Updated to call the renamed SyncSolution method to avoid CS0111 error
+        ProjectGeneration.SyncSolution();
+
+        // Unity project root – in the Editor this is the project directory
+        string projectRoot = Directory.GetCurrentDirectory();
+
+        bool hasFile = !string.IsNullOrEmpty(filePath);
+
+        if (hasFile)
         {
-            arguments = $"\"{filePath}\"";
+            // Unity may give relative paths; normalize them against the project root
+            if (!Path.IsPathRooted(filePath))
+            {
+                filePath = Path.GetFullPath(Path.Combine(projectRoot, filePath));
+            }
+
+            if (!File.Exists(filePath))
+            {
+                // If something weird happened and the file doesn't exist, just open the project
+                hasFile = false;
+            }
+        }
+
+        // 3. Build command-line args for Antigravity (VS Code-style)
+        // Always open the project root as the workspace
+        string arguments;
+
+        if (hasFile)
+        {
+            int safeLine = Math.Max(1, line);
+            int safeColumn = Math.Max(1, column);
+
+            // Open the project folder AND jump to specific file/line
+            // Antigravity is a VS Code fork, so it should support --goto "file:line:column"
+            arguments =
+                $"\"{projectRoot}\" --goto \"{filePath}:{safeLine}:{safeColumn}\"";
         }
         else
         {
-            arguments = $"\"{filePath}:{line}:{column}\"";
+            // Just open the project workspace
+            arguments = $"\"{projectRoot}\"";
         }
+
 
         try
         {
             Process process = new Process();
-            
-            // Handle macOS .app bundles specifically
-            if (installation.EndsWith(".app") && Application.platform == RuntimePlatform.OSXEditor)
-            {
-                process.StartInfo.FileName = "/usr/bin/open";
-                process.StartInfo.Arguments = $"-a \"{installation}\" -n --args {arguments}";
-            }
-            else
-            {
-                process.StartInfo.FileName = GetExecutablePath(installation);
-                process.StartInfo.Arguments = arguments;
-            }
+
+            // [Anmol V] Use direct binary execution for both Mac and Windows
+            // This allows the application (Electron) to handle single-instance logic correctly (reusing existing window)
+            process.StartInfo.FileName = GetExecutablePath(installation);
+            process.StartInfo.Arguments = arguments;
 
             process.StartInfo.UseShellExecute = false;
             process.StartInfo.CreateNoWindow = true;
             process.Start();
+
+            // [Anmol V] Force focus on macOS using AppleScript
+            // This ensures the editor comes to the foreground after opening
+            if (Application.platform == RuntimePlatform.OSXEditor)
+            {
+                string appName = Path.GetFileNameWithoutExtension(installation);
+                // Use a separate process to run the AppleScript to avoid blocking or complex argument escaping issues
+                Process.Start("osascript", $"-e \"tell application \\\"{appName}\\\" to activate\"");
+            }
+
             return true;
         }
         catch (Exception e)
@@ -125,17 +186,25 @@ public class AntigravityScriptEditor : IExternalCodeEditor
 
     public void SyncAll()
     {
-        ProjectGeneration.Sync();
+        // [Anmol V] Updated to call the renamed SyncSolution method
+        ProjectGeneration.SyncSolution();
     }
 
-    public void SyncIfNeeded(string[] addedAssets, string[] deletedAssets, string[] movedAssets, string[] movedFromAssetPaths, string[] importedAssets)
+    public void SyncIfNeeded(
+        string[] addedAssets,
+        string[] deletedAssets,
+        string[] movedAssets,
+        string[] movedFromAssetPaths,
+        string[] importedAssets)
     {
-        ProjectGeneration.SyncIfNeeded(addedAssets, deletedAssets, movedAssets, movedFromAssetPaths, importedAssets);
+        // [Anmol V] Updated to call the renamed SyncSolutionIfNeeded method
+        ProjectGeneration.SyncSolutionIfNeeded(
+            addedAssets, deletedAssets, movedAssets, movedFromAssetPaths, importedAssets);
     }
 
     public bool TryGetInstallationForPath(string editorPath, out CodeEditor.Installation installation)
     {
-        if (editorPath.Contains("Antigravity"))
+        if (!string.IsNullOrEmpty(editorPath) && editorPath.Contains("Antigravity", StringComparison.OrdinalIgnoreCase))
         {
             installation = new CodeEditor.Installation
             {
