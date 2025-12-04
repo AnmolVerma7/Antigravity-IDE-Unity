@@ -131,6 +131,23 @@ public class ProjectGeneration : IGenerator
     {
         SetupProjectSupportedExtensions();
         GenerateAndWriteSolutionAndProjects();
+        WriteVSCodeSettings();
+    }
+
+    public void WriteVSCodeSettings()
+    {
+        string vsCodeDir = Path.Combine(ProjectDirectory, ".vscode");
+        if (!Directory.Exists(vsCodeDir))
+            Directory.CreateDirectory(vsCodeDir);
+
+        string settingsPath = Path.Combine(vsCodeDir, "settings.json");
+
+        // [Anmol V] Toggle meta files visibility based on settings
+        // If MetaFiles is true (show), exclude should be false.
+        // If MetaFiles is false (hide), exclude should be true.
+        string content = k_SettingsJson.Replace("\"**/*.meta\":true", $"\"**/*.meta\":{(!Settings.MetaFiles).ToString().ToLower()}");
+
+        File.WriteAllText(settingsPath, content);
     }
 
     public bool HasSolutionBeenGenerated()
@@ -174,6 +191,7 @@ public class ProjectGeneration : IGenerator
         public static bool LocalTarball { get { return EditorPrefs.GetBool("Antigravity_LocalTarball", false); } set { EditorPrefs.SetBool("Antigravity_LocalTarball", value); } }
         public static bool Unknown { get { return EditorPrefs.GetBool("Antigravity_Unknown", false); } set { EditorPrefs.SetBool("Antigravity_Unknown", value); } }
         public static bool PlayerProjects { get { return EditorPrefs.GetBool("Antigravity_PlayerProjects", false); } set { EditorPrefs.SetBool("Antigravity_PlayerProjects", value); } }
+        public static bool MetaFiles { get { return EditorPrefs.GetBool("Antigravity_MetaFiles", true); } set { EditorPrefs.SetBool("Antigravity_MetaFiles", value); } }
     }
 
     public void GenerateAndWriteSolutionAndProjects()

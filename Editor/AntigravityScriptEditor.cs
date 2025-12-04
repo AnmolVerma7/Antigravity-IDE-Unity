@@ -111,6 +111,7 @@ public class AntigravityScriptEditor : IExternalCodeEditor
         ProjectGeneration.Settings.LocalTarball = EditorGUILayout.Toggle("Local tarball", ProjectGeneration.Settings.LocalTarball);
         ProjectGeneration.Settings.Unknown = EditorGUILayout.Toggle("Packages from unknown sources", ProjectGeneration.Settings.Unknown);
         ProjectGeneration.Settings.PlayerProjects = EditorGUILayout.Toggle("Player projects", ProjectGeneration.Settings.PlayerProjects);
+        ProjectGeneration.Settings.MetaFiles = EditorGUILayout.Toggle("Show .meta files", ProjectGeneration.Settings.MetaFiles);
 
         EditorGUI.indentLevel--;
 
