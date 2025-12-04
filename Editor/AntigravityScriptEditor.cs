@@ -135,7 +135,8 @@ public class AntigravityScriptEditor : IExternalCodeEditor
                 ext.Equals(".asmdef", StringComparison.OrdinalIgnoreCase) ||
                 ext.Equals(".asmref", StringComparison.OrdinalIgnoreCase) ||
                 ext.Equals(".uxml", StringComparison.OrdinalIgnoreCase) ||
-                ext.Equals(".uss", StringComparison.OrdinalIgnoreCase))
+                ext.Equals(".uss", StringComparison.OrdinalIgnoreCase) ||
+                ext.Equals(".unity", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
