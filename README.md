@@ -1,3 +1,5 @@
+
+
 # Antigravity IDE Support for Unity
 
 Integrates **Antigravity** as an external script editor for Unity, providing seamless file opening and project generation for Intellisense.
